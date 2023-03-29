@@ -1,16 +1,15 @@
 // Código de transmissão de dados da aplicação SISTEMA FOTOVOLTÁICO relacionada ao Smart Campus da UFPA
-// código editado em 20 de março de 2023
+// última atualização em 29 de março de 2023
 
 #include <Arduino.h>
 #include <lmic.h> // biblioteca lmic para transmissão LoRa
 #include <hal/hal.h>
-#include <MODBUS.h> // biblioteca MODBUS criada para extração de dados da UACT CC
+#include <MODBUS.h> // biblioteca MODBUS criada para extração de dados da UACT 3F
 #include <softwareReset.hpp> // biblioteca para resetar o microcontrolador
 
-MODBUS modbus(23,LED_BUILTIN); // inicializa a biblioteca
+MODBUS modbus(23,LED_BUILTIN);
 
 // chaves de acesso AES128 da criptografia LoRaWAN
-// Estas chaves devem ser as mesmas no transmissor e no dispositivo que deseja-se recuperar a informação
 static const PROGMEM u1_t NWKSKEY[16] = {/* Informação confidencial */}; //projeto
 
 static const u1_t PROGMEM APPSKEY[16] = {/* Informação confidencial */}; //projeto
@@ -32,22 +31,20 @@ const lmic_pinmap lmic_pins = {
   .dio = {2, 6, 7},
 };
 
-
-const byte aplicacao = 0x04; // código do sistema de baterias
+const byte aplicacao = 0x03; // código do sistema de baterias
 
 // parâmetros do protocolo MODBUS
-const byte DeviceAdress = 0x02; // endereço do dispositivo - UACT CC
+const byte DeviceAdress = 0x01; // endereço do dispositivo - UACT 3F
 const byte TypeRegisters = 0x04; // código de acesso dos registradores do tipo input
-const uint16_t InitAdress = 0x0004; // endereço do registrador inicial
-const uint16_t QuantRegisters = 0x0019; // quantidade de registradores
-
+const uint16_t InitAdress = 0x0000; // endereço do registrador inicial
+const uint16_t QuantRegisters = 0x0040; // quantidade de registradores
 
 // parâmetros dos dados recebidos da UAC CC
 struct UACTStruct
 {
-  byte packetReceived[55]; // tamanho da mensagem que o Arduino recebe por MODBUS
+  byte packetReceived[129];
   byte receivedByteIndex = 0;
-  byte PkgTotal[53]; // tamanho da mensagem que o Arduino transmite por LoRa
+  byte PkgTotal[125];
 };
 UACTStruct uactComponent;
 
@@ -68,12 +65,18 @@ void serialEvent1(){
 }
 
 // função para controlar o tempo entre requisição e resposta à UACT CC
-void millisEspera(unsigned long espera){
-    unsigned long initTime = millis();
-    while (millis() - initTime < espera )
-    {
-      serialEvent1();
-    }
+void espera(unsigned long tempo) {
+  static unsigned long lastRunTime = 0; // variável estática para armazenar o tempo da última execução da função
+  unsigned long currentTime = millis(); // obter o tempo atual
+
+  if (currentTime - lastRunTime >= tempo) { // verificar se já passou o tempo especificado
+    lastRunTime = currentTime; // atualizar o tempo da última execução
+    return; // sair da função e continuar a execução do programa
+  }
+
+  // se o tempo ainda não passou, aguardar
+  delay(tempo - (currentTime - lastRunTime));
+  lastRunTime = millis(); // atualizar o tempo da última execução
 }
 
 // função que limpa o payload de resposta da UACT CC
@@ -95,27 +98,22 @@ void receivedPkgTimerCallback(){
   bool valid = modbus.validacaoPacote(uactComponent.packetReceived);
 
   if(valid){ // só entra neste bloco se o CRC do pacote de resposta da UACT CC estiver correto
-
     uactComponent.PkgTotal[0] = aplicacao;
-
-    // esta parte do código corrige a posição dos bytes relacionados ao timestamp
     uactComponent.PkgTotal[1] = uactComponent.packetReceived[5];
     uactComponent.PkgTotal[2] = uactComponent.packetReceived[6];
     uactComponent.PkgTotal[3] = uactComponent.packetReceived[3];
     uactComponent.PkgTotal[4] = uactComponent.packetReceived[4];
-
-    // Esta parte do vetor corrige a posição dos byte da mensagem útil
-    for (byte i = 5; i<41; i=i+4){
+    // variaveis de interesse
+    for (byte i = 5; i<109; i=i+4){
       // i=40
-      uactComponent.PkgTotal[i] = uactComponent.packetReceived[i+16]; //   21-5
-      uactComponent.PkgTotal[i+1] = uactComponent.packetReceived[i+17]; // 22-5
-      uactComponent.PkgTotal[i+2] = uactComponent.packetReceived[i+14]; // 19-5
-      uactComponent.PkgTotal[i+3] = uactComponent.packetReceived[i+15]; // 20-5
+      uactComponent.PkgTotal[i] = uactComponent.packetReceived[i+24]; //   21-5
+      uactComponent.PkgTotal[i+1] = uactComponent.packetReceived[i+25]; // 22-5
+      uactComponent.PkgTotal[i+2] = uactComponent.packetReceived[i+22]; // 19-5
+      uactComponent.PkgTotal[i+3] = uactComponent.packetReceived[i+23]; // 20-5
     }
 
-    // existem 3 variáveis que a UACT CC não transmite mas consta no final da lista de variáveis da aplicação
-    // portanto devem ser preenchidas com zeros
-    for (byte i=41; i<53; i++){
+    // preenchendo com zero as variáveis com zeros
+    for (byte i=109; i<125; i++){
       uactComponent.PkgTotal[i] = 0x00;
     }
   }
@@ -136,12 +134,12 @@ void do_send(osjob_t* j) {
     // acessando o timestamp nos registradores holding
     clearReceivedPackage();
     modbus.EnviarPacote(DeviceAdress,TypeRegisters,InitAdress,QuantRegisters); // envia a requisição
-    millisEspera(300); // aguarda 300 milissegundos
+    espera(300); // aguarda 300 milissegundos
     Serial.print("Pacote Recebido: ");
     modbus.printar(uactComponent.packetReceived,sizeof(uactComponent.packetReceived)); // printa o pacote recebido da UACT CC
-    Serial.println("");
     receivedPkgTimerCallback(); // organiza o pacote para transmissão LoRa
-    Serial.print("Pacote para envio: "); // printa a informação organizada para transmissão LoRa
+    Serial.println("");
+    Serial.print("Pacote para envio: ");
     modbus.printar(uactComponent.PkgTotal,sizeof(uactComponent.PkgTotal)); // printa o pacote organizado
     
     LMIC_setTxData2(1, uactComponent.PkgTotal, sizeof(uactComponent.PkgTotal), 0); // envia o pacote organizado por LoRa
