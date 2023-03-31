@@ -1,5 +1,5 @@
-// Código de transmissão de dados da aplicação SISTEMA FOTOVOLTÁICO relacionada ao Smart Campus da UFPA
-// última atualização em 29 de março de 2023
+// Código de transmissão de dados da aplicação SISTEMA DE BATERIAS relacionada ao Smart Campus da UFPA
+// código editado em 20 de março de 2023
 
 #include <Arduino.h>
 #include <lmic.h> // biblioteca lmic para transmissão LoRa
@@ -35,14 +35,14 @@ const byte aplicacao = 0x03; // código do sistema de baterias
 
 // parâmetros do protocolo MODBUS
 const byte DeviceAdress = 0x01; // endereço do dispositivo - UACT 3F
+uint16_t InitAdress; // endereço do registrador inicial
 const byte TypeRegisters = 0x04; // código de acesso dos registradores do tipo input
-const uint16_t InitAdress = 0x0000; // endereço do registrador inicial
-const uint16_t QuantRegisters = 0x0040; // quantidade de registradores
+const uint16_t QuantRegisters = 0x001E; // quantidade de registradores
 
 // parâmetros dos dados recebidos da UAC CC
 struct UACTStruct
 {
-  byte packetReceived[129];
+  byte packetReceived[69];
   byte receivedByteIndex = 0;
   byte PkgTotal[125];
 };
@@ -64,19 +64,12 @@ void serialEvent1(){
   }
 }
 
-// função para controlar o tempo entre requisição e resposta à UACT CC
+// função para controlar o tempo
 void espera(unsigned long tempo) {
-  static unsigned long lastRunTime = 0; // variável estática para armazenar o tempo da última execução da função
-  unsigned long currentTime = millis(); // obter o tempo atual
-
-  if (currentTime - lastRunTime >= tempo) { // verificar se já passou o tempo especificado
-    lastRunTime = currentTime; // atualizar o tempo da última execução
-    return; // sair da função e continuar a execução do programa
+  unsigned long inicio = millis();
+  while (millis() - inicio < tempo) {
+    serialEvent1(); // Execute a função serialEvent1 durante o tempo de espera
   }
-
-  // se o tempo ainda não passou, aguardar
-  delay(tempo - (currentTime - lastRunTime));
-  lastRunTime = millis(); // atualizar o tempo da última execução
 }
 
 // função que limpa o payload de resposta da UACT CC
@@ -96,25 +89,32 @@ void clearReceivedPackageTotal(){
 void receivedPkgTimerCallback(){
   modbus.stillWaitNextBit = false;
   bool valid = modbus.validacaoPacote(uactComponent.packetReceived);
-
   if(valid){ // só entra neste bloco se o CRC do pacote de resposta da UACT CC estiver correto
-    uactComponent.PkgTotal[0] = aplicacao;
-    uactComponent.PkgTotal[1] = uactComponent.packetReceived[5];
-    uactComponent.PkgTotal[2] = uactComponent.packetReceived[6];
-    uactComponent.PkgTotal[3] = uactComponent.packetReceived[3];
-    uactComponent.PkgTotal[4] = uactComponent.packetReceived[4];
-    // variaveis de interesse
-    for (byte i = 5; i<109; i=i+4){
-      // i=40
-      uactComponent.PkgTotal[i] = uactComponent.packetReceived[i+24]; //   21-5
-      uactComponent.PkgTotal[i+1] = uactComponent.packetReceived[i+25]; // 22-5
-      uactComponent.PkgTotal[i+2] = uactComponent.packetReceived[i+22]; // 19-5
-      uactComponent.PkgTotal[i+3] = uactComponent.packetReceived[i+23]; // 20-5
+    if(InitAdress == 0x0004){
+      
+        uactComponent.PkgTotal[0] = aplicacao;
+        uactComponent.PkgTotal[1] = uactComponent.packetReceived[5];
+        uactComponent.PkgTotal[2] = uactComponent.packetReceived[6];
+        uactComponent.PkgTotal[3] = uactComponent.packetReceived[3];
+        uactComponent.PkgTotal[4] = uactComponent.packetReceived[4];
+        // variaveis de interesse
+        for (byte i = 5; i<41; i=i+4){
+          uactComponent.PkgTotal[i] = uactComponent.packetReceived[i+16]; //   21-5
+          uactComponent.PkgTotal[i+1] = uactComponent.packetReceived[i+17]; // 22-5
+          uactComponent.PkgTotal[i+2] = uactComponent.packetReceived[i+14]; // 19-5
+          uactComponent.PkgTotal[i+3] = uactComponent.packetReceived[i+15]; // 20-5
+        }
     }
-
-    // preenchendo com zero as variáveis com zeros
-    for (byte i=109; i<125; i++){
-      uactComponent.PkgTotal[i] = 0x00;
+    else if (InitAdress == 0x0022){
+      for (byte i = 41; i<109; i=i+4){
+          uactComponent.PkgTotal[i] = uactComponent.packetReceived[i-36]; //   21-5
+          uactComponent.PkgTotal[i+1] = uactComponent.packetReceived[i-35]; // 22-5
+          uactComponent.PkgTotal[i+2] = uactComponent.packetReceived[i-38]; // 19-5
+          uactComponent.PkgTotal[i+3] = uactComponent.packetReceived[i-37]; // 20-5
+      }
+      for (byte i=109; i<125;i++){
+        uactComponent.PkgTotal[i] = 0x00;
+      }
     }
   }
   else{ // se o pacote não estiver correto reseta o arduino
@@ -133,11 +133,20 @@ void do_send(osjob_t* j) {
   else {
     // acessando o timestamp nos registradores holding
     clearReceivedPackage();
+    InitAdress = 0x0004; // endereço do registrador inicial
     modbus.EnviarPacote(DeviceAdress,TypeRegisters,InitAdress,QuantRegisters); // envia a requisição
-    espera(300); // aguarda 300 milissegundos
+    espera(300); // aguarda 300 milissegundos entre a requisição e a resposta
     Serial.print("Pacote Recebido: ");
     modbus.printar(uactComponent.packetReceived,sizeof(uactComponent.packetReceived)); // printa o pacote recebido da UACT CC
-    receivedPkgTimerCallback(); // organiza o pacote para transmissão LoRa
+    receivedPkgTimerCallback(); // organiza o pacote
+    
+    InitAdress = 0x0022;
+    modbus.EnviarPacote(DeviceAdress,TypeRegisters,InitAdress,QuantRegisters); // envia a requisição
+    espera(300); // aguarda 300 milissegundos entre a requisição e a resposta
+    Serial.print("Pacote Recebido: ");
+    modbus.printar(uactComponent.packetReceived,sizeof(uactComponent.packetReceived)); // printa o pacote recebido da UACT CC
+    receivedPkgTimerCallback(); // organiza o pacote
+
     Serial.println("");
     Serial.print("Pacote para envio: ");
     modbus.printar(uactComponent.PkgTotal,sizeof(uactComponent.PkgTotal)); // printa o pacote organizado
@@ -145,6 +154,8 @@ void do_send(osjob_t* j) {
     LMIC_setTxData2(1, uactComponent.PkgTotal, sizeof(uactComponent.PkgTotal), 0); // envia o pacote organizado por LoRa
     Serial.println("Pacote enviado");
     clearReceivedPackageTotal(); // limpa o pacote de envio para não transmitir a informação anterior, quando houver erros no pacote
+
+    espera(24000); // Aguarda 4 minutos até enviar a próxima requisição
   }
 }
 void onEvent (ev_t ev) {
@@ -248,6 +259,7 @@ void setup() {
 
   Serial.println(LMIC.datarate);
   do_send(&sendjob); // chama a função que executará o envio do pacote por LoRa
+  delay(240000);
 }
 
 void loop() {
