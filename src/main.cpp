@@ -2,7 +2,7 @@
 #include <lmic.h> // biblioteca lmic para transmissão LoRa
 #include <hal/hal.h>
 #include <MODBUS.h> // biblioteca MODBUS criada para extração de dados da UACT 3F
-#include <TimeLib.h>
+#include <TimeLib.h> // biblioteca para converter timestamp no formato unix para dia, mes, ano, hora e minuto
 #include <softwareReset.hpp> // biblioteca para resetar o microcontrolador
 
 MODBUS modbus(23,LED_BUILTIN);
