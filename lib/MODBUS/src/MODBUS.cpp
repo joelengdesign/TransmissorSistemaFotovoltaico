@@ -2,9 +2,6 @@
 
 #include "MODBUS.h"
 
-#define RegistradoresInput
-// #define RegistradoresHolding
-
 MODBUS::MODBUS(int RS485Comunicacao, int led){
     pinMode(RS485Comunicacao, OUTPUT);
     pinMode(led, OUTPUT);
@@ -36,9 +33,9 @@ void MODBUS::EnviarPacote(byte EnderecoDoDispositivo,
     CodigoDeEnvio[6] = ((ErrorCheckEnvio >> 8*1) & 0xff);
     CodigoDeEnvio[7] = ((ErrorCheckEnvio >> 8*0) & 0xff);
 
-    Serial.println("");
-    Serial.print("Pacote de Requisição: ");
-    printar(CodigoDeEnvio,sizeof(CodigoDeEnvio));
+    // Serial.println("");
+    // Serial.print("Pacote de Requisição: ");
+    // printar(CodigoDeEnvio,sizeof(CodigoDeEnvio));
 
     digitalWrite(Led,HIGH);
     digitalWrite(pinoRS485Comunicacao,HIGH);
@@ -52,6 +49,19 @@ void MODBUS::EnviarPacote(byte EnderecoDoDispositivo,
     digitalWrite(Led,LOW);
     stillWaitNextBit = true;
     // Serial.print(stillWaitNextBit);
+}
+
+float MODBUS::IEEE754_HexToFloat(byte dado[], int n1, int n2, int n3, int n4){
+  union{
+    float valor_float;
+    uint32_t valor_inteiro;
+  }conversor;
+
+  conversor.valor_inteiro = ((uint32_t)dado[n1] << 24) | 
+                              ((uint32_t)dado[n2] << 16)|
+                              ((uint32_t)dado[n3] << 8) | 
+                              (uint32_t)dado[n4];
+  return(conversor.valor_float);
 }
 
 uint16_t MODBUS::ErrorCheck(byte mensagem[], uint8_t tamanho)
@@ -107,7 +117,10 @@ bool MODBUS::validacaoPacote(byte pacote[]){
 
   // Acrescenta o ErrorCheck recebido em uma variável de 2 bytes utilizando deslocamento de bits
   uint16_t ErrorCheckRebecido = (((uint16_t)(pacote[quantBytes+3] & 0xff)) << 8*1) | (((uint16_t)(pacote[quantBytes+4] & 0xff)) << 8*0);
-  
+  // Serial.print("ErrorCheck Recebido: ");
+  // Serial.println(ErrorCheckRebecido,HEX);
+
+
   // Extrai apenas o pacote sem os dois últimos bytes para calcular o ErrorCheck e comparar com o ErrorCheck recebido
   for(byte i=0;i<sizeof(pacoteParcial);i++){
     pacoteParcial[i] = pacote[i];
@@ -115,6 +128,8 @@ bool MODBUS::validacaoPacote(byte pacote[]){
 
   // calcula o ErrorCheck 
   uint16_t ErrorCheckCalculado = ErrorCheck(pacoteParcial,sizeof(pacoteParcial));
+  // Serial.print("ErrorCheck Calculado: ");
+  // Serial.println(ErrorCheckCalculado,HEX);
 
   // compara o ErrorCheck recebido e o ErrorCheck calculado
   if(ErrorCheckRebecido == ErrorCheckCalculado) valid = true; // se forem iguais retorna verdadeiro
