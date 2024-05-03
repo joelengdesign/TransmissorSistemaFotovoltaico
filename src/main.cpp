@@ -1,5 +1,14 @@
-// Código de transmissão de dados da aplicação SISTEMA DE BATERIAS relacionada ao Smart Campus da UFPA
-// código editado em 03 de abril de 2023
+/*
+  Autor: Joel Carvalho - Mestre em Engenharia Elétrica pela Universidade Federal do Pará
+
+  Descrição: Este código tem por objetivo receber as informações do UACT 3F por MODBUS e transmitir por LoRa
+  
+  Data de edição: 03/05/2024
+  
+  Versão: 2
+  
+  Notas adicionais: Protocolos envolvidos: MODBUS RTU/LoRa
+*/
 
 #include <Arduino.h>
 #include <lmic.h> // biblioteca lmic para transmissão LoRa
@@ -8,19 +17,15 @@
 #include <TimeLib.h> // biblioteca para converter timestamp no formato unix para hora e data
 #include <softwareReset.hpp> // biblioteca para resetar o microcontrolador
 
-MODBUS modbus(23,LED_BUILTIN);
+MODBUS modbus(23);
 
 // chaves de acesso AES128 da criptografia LoRaWAN
-static const PROGMEM u1_t NWKSKEY[16] = {/* Informação confidencial */}; //projeto
+static const PROGMEM u1_t NWKSKEY[16] = {/* Chave Restrita */}; //projeto
+static const u1_t PROGMEM APPSKEY[16] = {/* Chave Restrita */}; //projeto
 
-static const u1_t PROGMEM APPSKEY[16] = {/* Informação confidencial */}; //projeto
+// static const u1_t PROGMEM APPSKEY[16] = {0x88, 0x2a, 0x33, 0x04, 0xe1, 0xa9, 0x7d, 0xee, 0xc0, 0x1c, 0xd4, 0x1d, 0x59, 0xb0, 0x4c, 0x08 }; //projeto
 
-static const u4_t DEVADDR = 0x260138A0 ; // projeto <-- Change this address for every node!
-
-union {
-  float valor_float;
-  uint32_t valor_inteiro;
-} conversor;
+static const u4_t DEVADDR = 0x26013803 ; // projeto <-- Change this address for every node!
 
 void os_getArtEui (u1_t* buf) { }
 void os_getDevEui (u1_t* buf) { }
@@ -37,7 +42,7 @@ const lmic_pinmap lmic_pins = {
   .dio = {2, 6, 7},
 };
 
-const byte aplicacao = 0x03; // código do sistema de baterias
+const byte aplicacao = 0x05; // código do sistema de baterias
 
 // parâmetros do protocolo MODBUS
 const byte DeviceAdress = 0x01; // endereço do dispositivo - UACT 3F
@@ -45,76 +50,65 @@ const byte TypeRegisters = 0x04; // código de acesso dos registradores do tipo 
 const uint16_t InitAdress = 0x0004; // endereço do registrador inicial
 const uint16_t QuantRegisters = 0x003C; // quantidade de registradores
 
-// variaveis da aplicação
-float TensaoRMSFaseA;
-float TensaoRMSFaseB;
-float TensaoRMSFaseC;
+// Definir um vetor para armazenar os valores de deslocamento
+const int offsets[] = {5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49, 53, 57, 61, 65, 69, 73, 77, 81, 85, 89, 93, 97, 101, 105};
 
-float CorrenteRMSFaseA;
-float CorrenteRMSFaseB;
-float CorrenteRMSFaseC;
-float CorrenteRMSNeutro;
+// Definir os nomes das variáveis e a quantidade delas
+const char* nomesVariaveis[] = {
+    "Tensão RMS Fase A",
+    "Tensão RMS Fase B",
+    "Tensão RMS Fase C",
+    "Corrente RMS Fase A",
+    "Corrente RMS Fase B",
+    "Corrente RMS Fase C",
+    "Corrente RMS Neutro",
+    "Frequencia Fase A",
+    "Frequencia Fase B",
+    "Frequencia Fase C",
+    "Potencia Ativa Fase A",
+    "Potencia Ativa Fase B",
+    "Potencia Ativa Fase C",
+    "Potencia Ativa Total",
+    "Potencia Reativa FaseA",
+    "Potencia ReativaFase B",
+    "Potencia Reativa Fase C",
+    "Potencia Reativa Total",
+    "Potencia Aparente Fase A",
+    "Potencia Aparente Fase B",
+    "Potencia AparenteFase C",
+    "Potencia Aparente Total",
+    "Fator De Potencia Fase A",
+    "Fator De Potencia Fase B",
+    "Fator De Potencia Fase C",
+    "Fator De Potencia Total"
+};
 
-float FrequenciaFaseA;
-float FrequenciaFaseB;
-float FrequenciaFaseC;
+union {
+   uint8_t timesVector8[4] ;      //  4 bytes
+   uint32_t times32 ;   //  mapped onto the same storage as myFloat
+} timestamp;
 
-float PotenciaAtivaFaseA;
-float PotenciaAtivaFaseB;
-float PotenciaAtivaFaseC;
-float PotenciaAtivaTotal;
-
-float PotenciaReativaFaseA;
-float PotenciaReativaFaseB;
-float PotenciaReativaFaseC;
-float PotenciaReativaTotal;
-
-float PotenciaAparenteFaseA;
-float PotenciaAparenteFaseB;
-float PotenciaAparenteFaseC;
-float PotenciaAparenteTotal;
-
-float FatorDePotenciaFaseA;
-float FatorDePotenciaFaseB;
-float FatorDePotenciaFaseC;
-float FatorDePotenciaTotal;
-
-float ConsumoFaseA;
-float ConsumoFaseB;
-float ConsumoFaseC;
-float ConsumoTotal;
+// Quantidade de variáveis
+const int numVariaveis = sizeof(offsets) / sizeof(offsets[0]);
 
 // parâmetros dos dados recebidos da UAC CC
 struct UACTStruct
 {
   byte packetReceived[125];
-  byte receivedByteIndex = 0;
-  byte PkgTotal[125];
+  // byte receivedByteIndex = 0;
+  byte PkgTotal[numVariaveis*4+5];
 };
 UACTStruct uactComponent;
 
 // função que é chamada sempre que existem dados na serial do arduino para serem lidos
 void serialEvent1(){
-  byte incomingByte;
-  // Serial.println(stillWaitNextBit);
-  if (modbus.stillWaitNextBit)
-  {
-    while (Serial1.available()) {
-      incomingByte = Serial1.read();
-      // Serial.print(incomingByte, HEX);
-      // Serial.print(' ');
-      uactComponent.packetReceived[uactComponent.receivedByteIndex] = incomingByte;
-      uactComponent.receivedByteIndex += 1;
-    }
-  }
+  if (modbus.stillWaitNextBit) while (Serial1.available()) Serial1.readBytes(uactComponent.packetReceived,125);
 }
 
 // função para controlar o tempo entre requisição e resposta à UACT CC
 void espera(unsigned long tempo) {
   unsigned long inicio = millis();
-  while (millis() - inicio < tempo) {
-    serialEvent1(); // Execute a função serialEvent1 durante o tempo de espera
-  }
+  while (millis() - inicio < tempo) serialEvent1();
 }
 
 void esperaMinutos(int minutos) {
@@ -128,8 +122,6 @@ void esperaMinutos(int minutos) {
 // função que limpa o payload de resposta da UACT CC
 void clearReceivedPackage(){
   for (byte i = 0; i < sizeof(uactComponent.packetReceived); i++) uactComponent.packetReceived[i] = 0x0;
-  uactComponent.receivedByteIndex = 0;
-  // Serial.println("limpei o pacote");
 }
 
 // função que limpa o payload de transmissão com todos os dados tratados
@@ -142,6 +134,7 @@ void clearReceivedPackageTotal(){
 void OrganizePkg(){
   modbus.stillWaitNextBit = false;
   bool valid = modbus.validacaoPacote(uactComponent.packetReceived);
+  uactComponent.PkgTotal[0] = aplicacao;
 
   if(valid){ // só entra neste bloco se o CRC do pacote de resposta da UACT CC estiver correto
     uactComponent.PkgTotal[0] = aplicacao;
@@ -157,11 +150,6 @@ void OrganizePkg(){
       uactComponent.PkgTotal[i+2] = uactComponent.packetReceived[i+14]; // 19-5
       uactComponent.PkgTotal[i+3] = uactComponent.packetReceived[i+15]; // 20-5
     }
-
-    // preenchendo com zero as variáveis com zeros
-    for (byte i=109; i<125; i++){
-      uactComponent.PkgTotal[i] = 0x00;
-    }
   }
   else{ // se o pacote não estiver correto reseta o arduino
     Serial.println("Pacote inválido");
@@ -170,185 +158,60 @@ void OrganizePkg(){
   clearReceivedPackage();
 }
 
-void printarVars(){
-    // timestamp
-    unsigned long timestamp = ((unsigned long)uactComponent.PkgTotal[1] << 24) |  // Desloca o primeiro byte 24 bits para a esquerda
-                          ((unsigned long)uactComponent.PkgTotal[2] << 16) |  // Desloca o segundo byte 16 bits para a esquerda
-                          ((unsigned long)uactComponent.PkgTotal[3] << 8)  |  // Desloca o terceiro byte 8 bits para a esquerda
-                          ((unsigned long)uactComponent.PkgTotal[4]);        // Não precisa deslocar
+void printTimes(){
+  // timestamp
+  for(uint8_t i=1; i<5;i++){
+    timestamp.timesVector8[i-1] = uactComponent.PkgTotal[1];
+  }
 
-    setTime(timestamp);
-    
-    int dia = day();
-    int mes = month();
-    int ano = year();
-    int hora = hour();
-    int minuto = minute();
+  setTime(timestamp.times32);
+  
+  int dia = day();
+  int mes = month();
+  int ano = year();
+  int hora = hour();
+  int minuto = minute();
+  int segundo = second();
 
-    // variaveis
-
-    TensaoRMSFaseA = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,5,6,7,8);
-    TensaoRMSFaseB = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,9,10,11,12);
-    TensaoRMSFaseC = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,13,14,15,16);
-
-    CorrenteRMSFaseA = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,17,18,19,20);
-    CorrenteRMSFaseB = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,21,22,23,24);
-    CorrenteRMSFaseC = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,25,26,27,28);
-    CorrenteRMSNeutro = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,29,30,31,32);
-
-    FrequenciaFaseA = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,33,34,35,36);
-    FrequenciaFaseB = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,37,38,39,40);
-    FrequenciaFaseC = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,41,42,43,44);
-
-    PotenciaAtivaFaseA = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,45,46,47,48);
-    PotenciaAtivaFaseB = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,49,50,51,52);
-    PotenciaAtivaFaseC = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,53,54,55,56);
-    PotenciaAtivaTotal = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,57,58,59,60);
-
-    PotenciaReativaFaseA = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,61,62,63,64);
-    PotenciaReativaFaseB = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,65,66,67,68);
-    PotenciaReativaFaseC = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,69,70,71,72);
-    PotenciaReativaFaseC = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,73,74,75,76);
-
-    PotenciaAparenteFaseA = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,77,78,79,80);
-    PotenciaAparenteFaseB = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,81,82,83,84);
-    PotenciaAparenteFaseC = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,85,86,87,88);
-    PotenciaAparenteTotal = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,89,90,91,92);
-
-    FatorDePotenciaFaseA = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,93,94,95,96);
-    FatorDePotenciaFaseB = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,97,98,99,100);
-    FatorDePotenciaFaseC = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,101,102,103,104);
-    FatorDePotenciaTotal = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,105,106,107,108);
-
-    ConsumoFaseA = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,109,110,111,112);
-    ConsumoFaseB = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,113,114,115,116);
-    ConsumoFaseC = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,117,118,119,120);
-    ConsumoTotal = modbus.IEEE754_HexToFloat(uactComponent.PkgTotal,121,122,123,12);
-
-    // Imprime a data e hora obtidas
+  // Imprime a data e hora obtidas
     if(dia<10){
       Serial.print("0");
-      Serial.print(dia);
     }
-    else{
-      Serial.print(dia);
-    }
+    Serial.print(dia);
     Serial.print("/");
+
     if(mes<10){
       Serial.print("0");
-      Serial.print(mes);
     }
-    else{
-      Serial.print(mes);
-    }
+    Serial.print(mes);
     Serial.print("/");
     Serial.println(ano);
+
     if(hora<10){
       Serial.print("0");
-      Serial.print(hora);
     }
-    else{
-      Serial.print(hora);
-    }
+    Serial.print(hora);
     Serial.print("h");
-    if(hora<10){
+
+    if(minuto<10){
       Serial.print("0");
-      Serial.print(minuto);
     }
-    else{
-      Serial.print(minuto);
-    }
+    Serial.print(minuto);
     Serial.println("min");
 
-    Serial.print("Tensão RMS Fase A: ");
-    Serial.println(TensaoRMSFaseA);
+    if(segundo<10){
+      Serial.print("0");
+    }
+    Serial.print(segundo);
+    Serial.println("min");
+}
 
-    Serial.print("Tensão RMS FaseB: ");
-    Serial.println(TensaoRMSFaseB);
-
-    Serial.print("Tensão RMS Fase C: ");
-    Serial.println(TensaoRMSFaseC);
-
-    Serial.print("Corrente RMS Fase A: ");
-    Serial.println(CorrenteRMSFaseA);
-
-    Serial.print("Corrente RMS Fase B: ");
-    Serial.println(CorrenteRMSFaseB);
-
-    Serial.print("Corrente RMS Fase C: ");
-    Serial.println(CorrenteRMSFaseC);
-
-    Serial.print("Corrente RMS Neutro: ");
-    Serial.println(CorrenteRMSNeutro);
-
-    Serial.print("Frequência Fase A: ");
-    Serial.println(FrequenciaFaseA);
-
-    Serial.print("FrequenciaFaseB: ");
-    Serial.println(FrequenciaFaseB);
-
-    Serial.print("Frequência Fase C: ");
-    Serial.println(FrequenciaFaseC);
-
-    Serial.print("Potência Ativa Fase A: ");
-    Serial.println(PotenciaAtivaFaseA);
-
-    Serial.print("Potência Ativa Fase B: ");
-    Serial.println(PotenciaAtivaFaseB);
-
-    Serial.print("Potência Ativa Fase C: ");
-    Serial.println(PotenciaAtivaFaseC);
-
-    Serial.print("Potência Ativa Total: ");
-    Serial.println(PotenciaAtivaTotal);
-
-    Serial.print("Potência Reativa Fase A: ");
-    Serial.println(PotenciaReativaFaseA);
-
-    Serial.print("Potência Reativa Fase B: ");
-    Serial.println(PotenciaReativaFaseB);
-
-    Serial.print("Potência Reativa Fase C: ");
-    Serial.println(PotenciaReativaFaseC);
-
-    Serial.print("Potência Reativa Total: ");
-    Serial.println(PotenciaReativaTotal);
-
-    Serial.print("Potência Aparente Fase A: ");
-    Serial.println(PotenciaAparenteFaseA);
-
-    Serial.print("Potência Aparente Fase B: ");
-    Serial.println(PotenciaAparenteFaseB);
-
-    Serial.print("Potência Aparente Fase C: ");
-    Serial.println(PotenciaAparenteFaseC);
-
-    Serial.print("Potência Aparente Total: ");
-    Serial.println(PotenciaAparenteTotal);
-
-    Serial.print("Fator de Potência Fase A: ");
-    Serial.println(FatorDePotenciaFaseA);
-
-    Serial.print("Fator de Potência Fase B: ");
-    Serial.println(FatorDePotenciaFaseB);
-
-    Serial.print("Fator de Potência Fase C: ");
-    Serial.println(FatorDePotenciaFaseC);
-
-    Serial.print("Fator de Potência Total: ");
-    Serial.println(FatorDePotenciaTotal);
-
-    Serial.print("Consumo Fase A: ");
-    Serial.println(ConsumoFaseA);
-
-    Serial.print("Consumo Fase B: ");
-    Serial.println(ConsumoFaseB);
-
-    Serial.print("ConsumoFaseC: ");
-    Serial.println(ConsumoFaseC);
-
-    Serial.print("Consumo Total: ");
-    Serial.println(ConsumoTotal);
+void printVarsFloat(){
+  for (int i = 0; i < numVariaveis; i++) {
+    Serial.print(nomesVariaveis[i]);
+    Serial.print(": ");
+    Serial.println(modbus.IEEE754_HexToFloat(uactComponent.PkgTotal, offsets[i])); 
+  }
 }
 
 // Função de envio do pacote por LoRa.
@@ -369,7 +232,9 @@ void do_send(osjob_t* j) {
     Serial.print("Pacote para envio: ");
     modbus.printar(uactComponent.PkgTotal,sizeof(uactComponent.PkgTotal)); // printa o pacote organizado
     
-    printarVars();
+    printTimes();
+    Serial.println();
+    printVarsFloat();
 
     LMIC_setTxData2(1, uactComponent.PkgTotal, sizeof(uactComponent.PkgTotal), 0); // envia o pacote organizado por LoRa
     Serial.println("Pacote enviado");

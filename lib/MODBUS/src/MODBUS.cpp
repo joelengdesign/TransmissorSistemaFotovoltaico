@@ -1,12 +1,11 @@
+/* Classe MODBUS */
 #include <Arduino.h>
 
 #include "MODBUS.h"
 
-MODBUS::MODBUS(int RS485Comunicacao, int led){
+MODBUS::MODBUS(int RS485Comunicacao){
     pinMode(RS485Comunicacao, OUTPUT);
-    pinMode(led, OUTPUT);
     pinoRS485Comunicacao = RS485Comunicacao;
-    Led = led;
 }
 
 void MODBUS::EnviarPacote(byte EnderecoDoDispositivo,
@@ -37,30 +36,24 @@ void MODBUS::EnviarPacote(byte EnderecoDoDispositivo,
     // Serial.print("Pacote de Requisição: ");
     // printar(CodigoDeEnvio,sizeof(CodigoDeEnvio));
 
-    digitalWrite(Led,HIGH);
     digitalWrite(pinoRS485Comunicacao,HIGH);
-    
-    for (byte i=0; i<sizeof(CodigoDeEnvio);i++){
-        Serial1.write(CodigoDeEnvio[i]);
-    }
-    
+    Serial1.write(CodigoDeEnvio,sizeof(CodigoDeEnvio));
     Serial1.flush();
     digitalWrite(pinoRS485Comunicacao,LOW);
-    digitalWrite(Led,LOW);
     stillWaitNextBit = true;
     // Serial.print(stillWaitNextBit);
 }
 
-float MODBUS::IEEE754_HexToFloat(byte dado[], int n1, int n2, int n3, int n4){
+float MODBUS::IEEE754_HexToFloat(uint8_t dado[], int n){
   union{
     float valor_float;
     uint32_t valor_inteiro;
   }conversor;
 
-  conversor.valor_inteiro = ((uint32_t)dado[n1] << 24) | 
-                              ((uint32_t)dado[n2] << 16)|
-                              ((uint32_t)dado[n3] << 8) | 
-                              (uint32_t)dado[n4];
+  conversor.valor_inteiro = ((uint32_t)dado[n] << 24) | 
+                              ((uint32_t)dado[n+1] << 16)|
+                              ((uint32_t)dado[n+2] << 8) | 
+                              (uint32_t)dado[n+3];
   return(conversor.valor_float);
 }
 
@@ -81,13 +74,8 @@ uint16_t MODBUS::ErrorCheck(byte mensagem[], uint8_t tamanho)
   }
 
   // O formato retornado já sai invertido (LSByte primeiro que o MSByte)
-  crc = invert(crc);
+  crc = ((crc & 0xff) << 8*1) | (crc>>8*1);
   return crc;
-}
-
-uint16_t MODBUS::invert(uint16_t data){
-  data = ((data & 0xff) << 8*1) | (data>>8*1);
-  return data;
 }
 
 // função booleana que verifica a integridade do pacote, de forma que retorna falso caso a integridade do pacote esteja comprometida

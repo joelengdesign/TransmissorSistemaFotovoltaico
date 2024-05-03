@@ -1,15 +1,12 @@
+/* Classe MODBUS */
 #include <Arduino.h>
 
 class MODBUS{
     private:
         int pinoRS485Comunicacao;
-        int Led; // para teste
-        
-        // Método que inverte os 4 bits menos significativos de posição
-        uint16_t invert(uint16_t data);
     public:
         // Método que seta o pino de controle digital do RS485 e o pino digital do led para teste
-        MODBUS(int RS485Comunicacao, int led);
+        MODBUS(int RS485Comunicacao);
 
         // Método que faz a requisição dos dados do UAC
         void EnviarPacote(byte EnderecoDoDispositivo,byte CodigoDaFuncao, uint16_t EnderecoInicial, uint16_t QuantidadeDeRegistradores);
@@ -21,7 +18,7 @@ class MODBUS{
         bool validacaoPacote(byte pacote[]);
 
         // função que converte os valores hexadecimais do formato IEEE754 para float
-        float IEEE754_HexToFloat(byte dado[], int n1, int n2, int n3, int n4);
+        float IEEE754_HexToFloat(uint8_t dado[], int n);
 
         // função para printar pacotes
         void printar(byte pacote[], byte tamanho);
