@@ -1,4 +1,3 @@
-/* Classe MODBUS */
 #include <Arduino.h>
 
 #include "MODBUS.h"
@@ -128,13 +127,7 @@ bool MODBUS::validacaoPacote(byte pacote[]){
 
 // função para printar vetores em hexadecimal
 void MODBUS::printar(byte pacote[], byte tamanho){
-  for(byte i=0; i<tamanho;i++){
-      if(pacote[i]<0x10){
-        Serial.print("0");Serial.print(pacote[i],HEX); Serial.print(" ");
-      }
-      else{
-        Serial.print(pacote[i],HEX); Serial.print(" ");
-      }
-    }
-    Serial.println(""); Serial.println("------------------");
+  for(uint8_t i = 0; i<tamanho; i++)
+    Serial.print((pacote[i] < 0x10) ? "0"+String(pacote[i],HEX) : String(pacote[i],HEX)+" ");
+  Serial.println();
 }

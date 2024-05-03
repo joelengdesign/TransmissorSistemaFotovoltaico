@@ -1,4 +1,3 @@
-/* Classe MODBUS */
 #include <Arduino.h>
 
 class MODBUS{
